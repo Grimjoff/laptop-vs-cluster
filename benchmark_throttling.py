@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import json
 import re
 import glob
 import shutil
@@ -29,28 +30,75 @@ except ImportError:
 def probe_cpu_temperature():
     """
     Cross-platform CPU temperature probe.
-    Supports Linux (Cluster / sysfs / psutil), macOS (powermetrics / osx-cpu-temp), and fallback.
+    Supports macOS (macmon for Apple Silicon / osx-cpu-temp / powermetrics),
+    Linux (Cluster / sysfs / psutil), and fallback.
     Returns float temperature in Celsius or None.
     """
-    # 1. Check psutil.sensors_temperatures (Standard on Linux, some Windows)
+    # 1. macOS (Apple Silicon via macmon or fallback)
+    if platform.system() == "Darwin":
+        # Check macmon (Apple Silicon sudoless telemetry)
+        if shutil.which("macmon"):
+            try:
+                proc = subprocess.Popen(
+                    ["macmon", "pipe", "-i", "100"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                )
+                line = proc.stdout.readline()
+                proc.terminate()
+                proc.wait(timeout=1.0)
+                if line:
+                    data = json.loads(line)
+                    t = data.get("temp", {}).get("cpu_temp_avg")
+                    if t and float(t) > 5.0:
+                        return float(t)
+            except Exception:
+                pass
+
+        # Check osx-cpu-temp (legacy Intel Mac Homebrew tool)
+        if shutil.which("osx-cpu-temp"):
+            try:
+                res = subprocess.run(["osx-cpu-temp"], capture_output=True, text=True, timeout=1)
+                match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*°?C", res.stdout)
+                if match:
+                    val = float(match.group(1))
+                    if val > 5.0:  # Ignore 0.0 °C dummy readings on Apple Silicon
+                        return val
+            except Exception:
+                pass
+
+        # Check powermetrics (built into macOS, requires sudo)
+        try:
+            cmd = ["powermetrics", "-n", "1", "-i", "200", "--samplers", "smc"]
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=1.5)
+            match = re.search(r"CPU die temperature:\s*([0-9.]+)\s*C", res.stdout)
+            if match:
+                val = float(match.group(1))
+                if val > 5.0:
+                    return val
+        except Exception:
+            pass
+
+    # 2. Check psutil.sensors_temperatures (Standard on Linux, some Windows)
     if HAS_PSUTIL and hasattr(psutil, "sensors_temperatures"):
         try:
             temps = psutil.sensors_temperatures()
             if temps:
                 for name in ["coretemp", "cpu_thermal", "k10temp", "acpitz", "cpu-thermal"]:
                     if name in temps and len(temps[name]) > 0:
-                        vals = [entry.current for entry in temps[name] if entry.current is not None]
+                        vals = [entry.current for entry in temps[name] if entry.current is not None and entry.current > 5.0]
                         if vals:
                             return float(sum(vals) / len(vals))
                 # Fallback to any sensor
                 for entries in temps.values():
-                    vals = [entry.current for entry in entries if entry.current is not None]
+                    vals = [entry.current for entry in entries if entry.current is not None and entry.current > 5.0]
                     if vals:
                         return float(sum(vals) / len(vals))
         except Exception:
             pass
 
-    # 2. Linux SysFS (/sys/class/thermal/thermal_zone*/temp)
+    # 3. Linux SysFS (/sys/class/thermal/thermal_zone*/temp)
     if platform.system() == "Linux":
         try:
             zone_files = glob.glob("/sys/class/thermal/thermal_zone*/temp")
@@ -67,28 +115,6 @@ def probe_cpu_temperature():
         except Exception:
             pass
 
-    # 3. macOS (Apple Silicon / Intel Mac)
-    if platform.system() == "Darwin":
-        # Check osx-cpu-temp (Homebrew tool)
-        if shutil.which("osx-cpu-temp"):
-            try:
-                res = subprocess.run(["osx-cpu-temp"], capture_output=True, text=True, timeout=1)
-                match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*°?C", res.stdout)
-                if match:
-                    return float(match.group(1))
-            except Exception:
-                pass
-
-        # Check powermetrics (built into macOS, requires sudo)
-        try:
-            cmd = ["powermetrics", "-n", "1", "-i", "200", "--samplers", "smc"]
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=1.5)
-            match = re.search(r"CPU die temperature:\s*([0-9.]+)\s*C", res.stdout)
-            if match:
-                return float(match.group(1))
-        except Exception:
-            pass
-
     return None
 
 
@@ -96,32 +122,72 @@ class HardwareSampler(threading.Thread):
     """
     Background sampling thread that tracks CPU Temperature, Clock Frequency, and Utilization
     during each model training execution.
+    Supports real-time streaming telemetry via macmon on Apple Silicon and psutil on Linux.
     """
     def __init__(self, interval_sec=1.0):
         super().__init__(daemon=True)
         self.interval_sec = interval_sec
         self.stop_event = threading.Event()
-        self.temps = []
+        init_t = probe_cpu_temperature()
+        self.temps = [init_t] if (init_t and init_t > 5.0) else []
         self.clocks = []
         self.cpu_pcts = []
+        self.macmon_proc = None
 
     def run(self):
+        # Path A: Apple Silicon with macmon stream
+        if platform.system() == "Darwin" and shutil.which("macmon"):
+            try:
+                interval_ms = max(200, int(self.interval_sec * 1000))
+                self.macmon_proc = subprocess.Popen(
+                    ["macmon", "pipe", "-i", str(interval_ms)],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                )
+                while not self.stop_event.is_set():
+                    line = self.macmon_proc.stdout.readline()
+                    if not line:
+                        break
+                    try:
+                        data = json.loads(line)
+                        t = data.get("temp", {}).get("cpu_temp_avg")
+                        if t and float(t) > 5.0:
+                            self.temps.append(float(t))
+
+                        # P-Core frequency in MHz
+                        freq = data.get("pcpu_freq_mhz")
+                        if not freq:
+                            cores = data.get("pcpu_cores", []) + data.get("ecpu_cores", [])
+                            if cores:
+                                freq = sum(c.get("freq_mhz", 0) for c in cores) / len(cores)
+                        if freq and float(freq) > 100:  # Avoid dummy 4 MHz values
+                            self.clocks.append(float(freq))
+
+                        usage = data.get("cpu_usage_pct") or data.get("cpu_active_ratio") or data.get("cpu_scaled_ratio")
+                        if usage is not None:
+                            pct_val = float(usage) * 100.0 if float(usage) <= 1.0 else float(usage)
+                            self.cpu_pcts.append(pct_val)
+                    except Exception:
+                        pass
+                return
+            except Exception:
+                pass
+
+        # Path B: Standard polling loop (Linux / Cluster / Fallback)
         while not self.stop_event.is_set():
-            # 1. Sample Temperature
             temp = probe_cpu_temperature()
-            if temp is not None:
+            if temp is not None and temp > 5.0:
                 self.temps.append(temp)
 
-            # 2. Sample Clock Frequency (MHz)
             if HAS_PSUTIL:
                 try:
                     freq = psutil.cpu_freq()
-                    if freq and freq.current:
+                    if freq and freq.current and freq.current > 100:  # Filter out 4 MHz junk
                         self.clocks.append(freq.current)
                 except Exception:
                     pass
 
-                # 3. Sample CPU Utilization (%)
                 try:
                     pct = psutil.cpu_percent(interval=None)
                     if pct:
@@ -133,6 +199,13 @@ class HardwareSampler(threading.Thread):
 
     def stop_and_aggregate(self):
         self.stop_event.set()
+        if self.macmon_proc:
+            try:
+                self.macmon_proc.terminate()
+                self.macmon_proc.wait(timeout=1.0)
+            except Exception:
+                pass
+
         self.join(timeout=2.0)
 
         avg_temp = round(sum(self.temps) / len(self.temps), 1) if self.temps else None
