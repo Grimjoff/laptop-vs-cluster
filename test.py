@@ -1,3 +1,4 @@
+import os
 import time
 import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
@@ -29,21 +30,47 @@ X_train, X_test, y_train, y_test = train_test_split(
 )
 print(f"Train set: {len(X_train):,} samples | Test set: {len(X_test):,} samples")
 
-# 4. Initialize and train RandomForest Regressor
+# Benchmark configuration & hyperparameters
+n_estimators = 100
+max_depth = 15
+random_state = 42
+cores_amount = [1, 2, 4, 8, 10, 12, 16]
+csv_file = "benchmark_results.csv"
+
+# Ensure output directory exists if a subfolder is specified
+csv_dir = os.path.dirname(csv_file)
+if csv_dir:
+    os.makedirs(csv_dir, exist_ok=True)
+
 print("\nTraining RandomForestRegressor...")
-rf = RandomForestRegressor(
-    n_estimators=100,
-    max_depth=15,
-    n_jobs=-1,          # Utilize all CPU cores
-    random_state=42,
-)
+for number in cores_amount:
+    for i in range(4):
+    # 4. Initialize and train RandomForest Regressor
+        rf = RandomForestRegressor(
+            n_estimators=n_estimators,
+            max_depth=max_depth,
+            n_jobs=number,          # Utilize specified CPU cores
+            random_state=random_state,
+        )
 
-t0 = time.time()
-rf.fit(X_train, y_train)
-train_time = time.time() - t0
-print(f"Training completed in {train_time:.2f} seconds.")
+        t0 = time.time()
+        rf.fit(X_train, y_train)
+        train_time = time.time() - t0
+        print(f"Training on {number} cores completed in {train_time:.2f} seconds.")
 
-# 5. Evaluate on Test Set
+        # Save each run's setup and duration to CSV
+        run_result = pd.DataFrame([{
+            "sample_size": len(data),
+            "n_estimators": n_estimators,
+            "max_depth": max_depth,
+            "random_state": random_state,
+            "n_jobs": number,
+            "duration_sec": round(train_time, 4),
+        }])
+
+        file_exists = os.path.exists(csv_file) and os.path.getsize(csv_file) > 0
+        run_result.to_csv(csv_file, mode="a", header=not file_exists, index=False)
+
 y_pred = rf.predict(X_test)
 rmse = root_mean_squared_error(y_test, y_pred)
 mae = mean_absolute_error(y_test, y_pred)
