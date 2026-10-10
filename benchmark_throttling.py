@@ -1,19 +1,151 @@
 import os
 import sys
 import time
+import re
+import glob
+import shutil
 import argparse
 import platform
+import threading
+import subprocess
 import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor
 
-# Optional xgboost support if installed
+try:
+    import psutil
+    HAS_PSUTIL = True
+except ImportError:
+    HAS_PSUTIL = False
+
 try:
     from xgboost import XGBRegressor
     HAS_XGB = True
 except ImportError:
     HAS_XGB = False
+
+
+def probe_cpu_temperature():
+    """
+    Cross-platform CPU temperature probe.
+    Supports Linux (Cluster / sysfs / psutil), macOS (powermetrics / osx-cpu-temp), and fallback.
+    Returns float temperature in Celsius or None.
+    """
+    # 1. Check psutil.sensors_temperatures (Standard on Linux, some Windows)
+    if HAS_PSUTIL and hasattr(psutil, "sensors_temperatures"):
+        try:
+            temps = psutil.sensors_temperatures()
+            if temps:
+                for name in ["coretemp", "cpu_thermal", "k10temp", "acpitz", "cpu-thermal"]:
+                    if name in temps and len(temps[name]) > 0:
+                        vals = [entry.current for entry in temps[name] if entry.current is not None]
+                        if vals:
+                            return float(sum(vals) / len(vals))
+                # Fallback to any sensor
+                for entries in temps.values():
+                    vals = [entry.current for entry in entries if entry.current is not None]
+                    if vals:
+                        return float(sum(vals) / len(vals))
+        except Exception:
+            pass
+
+    # 2. Linux SysFS (/sys/class/thermal/thermal_zone*/temp)
+    if platform.system() == "Linux":
+        try:
+            zone_files = glob.glob("/sys/class/thermal/thermal_zone*/temp")
+            readings = []
+            for zf in zone_files:
+                with open(zf, "r") as f:
+                    val = float(f.read().strip())
+                    if val > 1000:
+                        val /= 1000.0  # milli-degrees to degrees
+                    if 15.0 <= val <= 115.0:
+                        readings.append(val)
+            if readings:
+                return float(sum(readings) / len(readings))
+        except Exception:
+            pass
+
+    # 3. macOS (Apple Silicon / Intel Mac)
+    if platform.system() == "Darwin":
+        # Check osx-cpu-temp (Homebrew tool)
+        if shutil.which("osx-cpu-temp"):
+            try:
+                res = subprocess.run(["osx-cpu-temp"], capture_output=True, text=True, timeout=1)
+                match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*°?C", res.stdout)
+                if match:
+                    return float(match.group(1))
+            except Exception:
+                pass
+
+        # Check powermetrics (built into macOS, requires sudo)
+        try:
+            cmd = ["powermetrics", "-n", "1", "-i", "200", "--samplers", "smc"]
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=1.5)
+            match = re.search(r"CPU die temperature:\s*([0-9.]+)\s*C", res.stdout)
+            if match:
+                return float(match.group(1))
+        except Exception:
+            pass
+
+    return None
+
+
+class HardwareSampler(threading.Thread):
+    """
+    Background sampling thread that tracks CPU Temperature, Clock Frequency, and Utilization
+    during each model training execution.
+    """
+    def __init__(self, interval_sec=1.0):
+        super().__init__(daemon=True)
+        self.interval_sec = interval_sec
+        self.stop_event = threading.Event()
+        self.temps = []
+        self.clocks = []
+        self.cpu_pcts = []
+
+    def run(self):
+        while not self.stop_event.is_set():
+            # 1. Sample Temperature
+            temp = probe_cpu_temperature()
+            if temp is not None:
+                self.temps.append(temp)
+
+            # 2. Sample Clock Frequency (MHz)
+            if HAS_PSUTIL:
+                try:
+                    freq = psutil.cpu_freq()
+                    if freq and freq.current:
+                        self.clocks.append(freq.current)
+                except Exception:
+                    pass
+
+                # 3. Sample CPU Utilization (%)
+                try:
+                    pct = psutil.cpu_percent(interval=None)
+                    if pct:
+                        self.cpu_pcts.append(pct)
+                except Exception:
+                    pass
+
+            self.stop_event.wait(self.interval_sec)
+
+    def stop_and_aggregate(self):
+        self.stop_event.set()
+        self.join(timeout=2.0)
+
+        avg_temp = round(sum(self.temps) / len(self.temps), 1) if self.temps else None
+        max_temp = round(max(self.temps), 1) if self.temps else None
+        avg_clock = round(sum(self.clocks) / len(self.clocks), 0) if self.clocks else None
+        avg_cpu = round(sum(self.cpu_pcts) / len(self.cpu_pcts), 1) if self.cpu_pcts else None
+
+        return {
+            "avg_temp_c": avg_temp,
+            "max_temp_c": max_temp,
+            "avg_clock_mhz": avg_clock,
+            "avg_cpu_pct": avg_cpu,
+        }
 
 
 def run_throttling_benchmark(
@@ -33,23 +165,27 @@ def run_throttling_benchmark(
     if not os.path.exists(parquet_path):
         raise FileNotFoundError(f"Parquet file not found at: {parquet_path}")
 
-    # Detect machine info if not provided
     if machine_label is None:
         machine_label = f"{platform.system()}_{platform.machine()}"
 
     max_cores = os.cpu_count() or 1
     active_cores = max_cores if (n_jobs == -1 or n_jobs is None) else min(n_jobs, max_cores)
 
-    print("=" * 70)
-    print("        HPC THERMAL THROTTLING BENCHMARK (Continuous Load)        ")
-    print("=" * 70)
+    # Initial hardware check
+    initial_temp = probe_cpu_temperature()
+    temp_support = f"Available ({initial_temp:.1f} °C)" if initial_temp is not None else "Sensor not directly exposed (logging clock/CPU usage)"
+
+    print("=" * 80)
+    print("        HPC THERMAL THROTTLING BENCHMARK (Continuous Load & Telemetry)        ")
+    print("=" * 80)
     print(f"Machine Label      : {machine_label}")
     print(f"Platform           : {platform.platform()}")
-    print(f"Detected CPU Cores : {max_cores} physical/logical")
-    print(f"Active Worker Cores: {active_cores} (n_jobs={n_jobs})")
+    print(f"Detected CPU Cores : {max_cores} cores")
+    print(f"Active Worker Cores: {active_cores} cores (n_jobs={n_jobs})")
+    print(f"Temperature Sensor : {temp_support}")
     print(f"Model Architecture : {model_type.upper()}")
     print(f"Total Iterations   : {total_runs} consecutive runs (ZERO delay)")
-    print("=" * 70)
+    print("=" * 80)
 
     # 1. Load dataset
     print(f"\nLoading dataset: {parquet_path}...")
@@ -73,7 +209,6 @@ def run_throttling_benchmark(
     )
     print(f"Training set: {len(X_train):,} samples\n")
 
-    # Ensure output directories exist
     os.makedirs(os.path.dirname(csv_file) or ".", exist_ok=True)
     if plot_path:
         os.makedirs(os.path.dirname(plot_path) or ".", exist_ok=True)
@@ -81,12 +216,11 @@ def run_throttling_benchmark(
     results = []
     baseline_time = None
 
-    print("-" * 70)
-    print(f"{'Run':<6} | {'Duration (s)':<14} | {'vs Run 1':<12} | {'Timestamp':<20}")
-    print("-" * 70)
+    print("-" * 80)
+    print(f"{'Run':<5} | {'Duration (s)':<13} | {'vs Run 1':<10} | {'Avg Temp':<10} | {'Max Temp':<10} | {'Avg Clock':<11} | {'Timestamp':<19}")
+    print("-" * 80)
 
     for run_idx in range(1, total_runs + 1):
-        # Instantiate model for each iteration to clear cached tree allocations
         if model_type.lower() == "rf":
             model = RandomForestRegressor(
                 n_estimators=n_estimators,
@@ -107,10 +241,17 @@ def run_throttling_benchmark(
         else:
             raise ValueError(f"Unknown model type: {model_type}. Choose 'rf' or 'xgb'.")
 
+        # Start hardware monitoring thread during fit
+        sampler = HardwareSampler(interval_sec=1.0)
+        sampler.start()
+
         timestamp_start = time.strftime("%Y-%m-%d %H:%M:%S")
         t0 = time.time()
         model.fit(X_train, y_train)
         duration = round(time.time() - t0, 4)
+
+        # Stop telemetry sampler
+        telemetry = sampler.stop_and_aggregate()
 
         if baseline_time is None:
             baseline_time = duration
@@ -121,7 +262,11 @@ def run_throttling_benchmark(
             sign = "+" if slowdown_pct >= 0 else ""
             delta_str = f"{sign}{slowdown_pct:.1f}%"
 
-        print(f"Run {run_idx:<2} | {duration:10.2f}s    | {delta_str:<12} | {timestamp_start}")
+        temp_str = f"{telemetry['avg_temp_c']} °C" if telemetry['avg_temp_c'] is not None else "N/A"
+        max_temp_str = f"{telemetry['max_temp_c']} °C" if telemetry['max_temp_c'] is not None else "N/A"
+        clock_str = f"{int(telemetry['avg_clock_mhz'])} MHz" if telemetry['avg_clock_mhz'] is not None else "N/A"
+
+        print(f"Run {run_idx:<2}| {duration:9.2f}s    | {delta_str:<10} | {temp_str:<10} | {max_temp_str:<10} | {clock_str:<11} | {timestamp_start}")
 
         record = {
             "machine": machine_label,
@@ -131,21 +276,25 @@ def run_throttling_benchmark(
             "run_index": run_idx,
             "duration_sec": duration,
             "slowdown_pct": slowdown_pct,
+            "avg_temp_c": telemetry["avg_temp_c"],
+            "max_temp_c": telemetry["max_temp_c"],
+            "avg_clock_mhz": telemetry["avg_clock_mhz"],
+            "avg_cpu_pct": telemetry["avg_cpu_pct"],
             "timestamp": timestamp_start,
         }
         results.append(record)
 
-        # Append immediately to CSV so progress is saved even if stopped early
+        # Append row immediately to CSV
         row_df = pd.DataFrame([record])
         file_exists = os.path.exists(csv_file) and os.path.getsize(csv_file) > 0
         row_df.to_csv(csv_file, mode="a", header=not file_exists, index=False)
 
     df_results = pd.DataFrame(results)
 
-    print("-" * 70)
+    print("-" * 80)
     print(f"\nAll {total_runs} runs completed successfully.")
     print(f"Results appended to: {csv_file}")
-    
+
     first_run = df_results.iloc[0]["duration_sec"]
     last_run = df_results.iloc[-1]["duration_sec"]
     overall_slowdown = ((last_run - first_run) / first_run) * 100
@@ -154,69 +303,70 @@ def run_throttling_benchmark(
     print(f"  Run {total_runs} (Heat-soaked)   : {last_run:.2f}s")
     print(f"  Total Thermal Slowdown : {overall_slowdown:+.1f}%\n")
 
-    # 3. Generate Plot (Grafik 1: Thermal Throttling)
+    # 3. Generate Plot
     if plot_path:
         _plot_throttling(df_results, plot_path, machine_label, show_plot)
 
 
 def _plot_throttling(df_results, plot_path, machine_label, show_plot):
     plt.style.use("seaborn-v0_8-whitegrid" if "seaborn-v0_8-whitegrid" in plt.style.available else "default")
-    fig, ax = plt.subplots(figsize=(9, 5.5), dpi=150)
 
+    has_temp = df_results["avg_temp_c"].notnull().any()
     runs = df_results["run_index"]
     durations = df_results["duration_sec"]
 
-    ax.plot(
-        runs,
-        durations,
-        marker="o",
-        linewidth=2.2,
-        markersize=7,
-        color="#e11d48",
-        label=f"{machine_label} (Sustained Load)",
-        zorder=3,
-    )
+    if has_temp:
+        # Create dual-panel stacked plot (Top: Duration, Bottom: Temperature & Clock)
+        fig, (ax_dur, ax_temp) = plt.subplots(2, 1, figsize=(9.5, 8.5), dpi=150, sharex=True)
 
-    # Highlight cold baseline and heat-soaked run
-    r1_val = durations.iloc[0]
-    r_end_val = durations.iloc[-1]
-    ax.annotate(
-        f"Run 1: {r1_val:.1f}s\n(Cold)",
-        xy=(runs.iloc[0], r1_val),
-        xytext=(15, 15),
-        textcoords="offset points",
-        arrowprops=dict(arrowstyle="->", color="#1e293b", lw=1),
-        fontweight="bold",
-        fontsize=9,
-        color="#1e293b",
-    )
+        # Top Plot: Execution Time
+        ax_dur.plot(runs, durations, marker="o", linewidth=2.2, markersize=7, color="#e11d48", label="Execution Duration", zorder=3)
+        r1_val = durations.iloc[0]
+        r_end_val = durations.iloc[-1]
+        ax_dur.annotate(f"Run 1: {r1_val:.1f}s\n(Cold)", xy=(runs.iloc[0], r1_val), xytext=(15, 10), textcoords="offset points",
+                        arrowprops=dict(arrowstyle="->", color="#1e293b", lw=1), fontweight="bold", fontsize=9, color="#1e293b")
+        diff_pct = ((r_end_val - r1_val) / r1_val) * 100
+        sign = "+" if diff_pct >= 0 else ""
+        ax_dur.annotate(f"Run {runs.iloc[-1]}: {r_end_val:.1f}s\n({sign}{diff_pct:.1f}%)", xy=(runs.iloc[-1], r_end_val), xytext=(-55, 10),
+                        textcoords="offset points", arrowprops=dict(arrowstyle="->", color="#1e293b", lw=1), fontweight="bold", fontsize=9, color="#9f1239")
+        ax_dur.set_title(f"Thermal Throttling & Telemetry: {machine_label} (Sustained Workload)", fontsize=13, fontweight="bold", pad=12)
+        ax_dur.set_ylabel("Execution Time (seconds)", fontsize=11, labelpad=8)
+        ax_dur.grid(True, linestyle="--", alpha=0.6)
+        ax_dur.legend(loc="upper left", frameon=True, facecolor="white", edgecolor="#cbd5e1")
+        ax_dur.set_ylim(bottom=max(0, durations.min() * 0.9), top=durations.max() * 1.15)
 
-    diff_pct = ((r_end_val - r1_val) / r1_val) * 100
-    sign = "+" if diff_pct >= 0 else ""
-    ax.annotate(
-        f"Run {runs.iloc[-1]}: {r_end_val:.1f}s\n({sign}{diff_pct:.1f}%)",
-        xy=(runs.iloc[-1], r_end_val),
-        xytext=(-45, 15),
-        textcoords="offset points",
-        arrowprops=dict(arrowstyle="->", color="#1e293b", lw=1),
-        fontweight="bold",
-        fontsize=9,
-        color="#9f1239",
-    )
+        # Bottom Plot: Temperature
+        ax_temp.plot(runs, df_results["avg_temp_c"], marker="s", linewidth=2.0, markersize=6, color="#f97316", label="Avg CPU Temperature (°C)", zorder=3)
+        if df_results["max_temp_c"].notnull().any():
+            ax_temp.plot(runs, df_results["max_temp_c"], marker="^", linestyle=":", linewidth=1.5, markersize=6, color="#dc2626", label="Peak CPU Temp (°C)", zorder=2)
+        ax_temp.set_xlabel("Consecutive Run Index (1 to 15)", fontsize=11, labelpad=10)
+        ax_temp.set_ylabel("Temperature (°C)", fontsize=11, labelpad=8)
+        ax_temp.set_xticks(runs.tolist())
+        ax_temp.grid(True, linestyle="--", alpha=0.6)
+        ax_temp.legend(loc="lower right", frameon=True, facecolor="white", edgecolor="#cbd5e1")
 
-    ax.set_title("Thermal Throttling: Training Duration vs. Consecutive Iterations", fontsize=13, fontweight="bold", pad=15)
-    ax.set_xlabel("Consecutive Run Index (1 to 15)", fontsize=11, labelpad=10)
-    ax.set_ylabel("Execution Time (seconds)", fontsize=11, labelpad=10)
-    ax.set_xticks(runs.tolist())
-    ax.grid(True, linestyle="--", alpha=0.6)
-    ax.legend(frameon=True, facecolor="white", edgecolor="#cbd5e1")
+        fig.tight_layout()
+    else:
+        # Single panel plot if temperature sensor is unavailable
+        fig, ax_dur = plt.subplots(figsize=(9, 5.5), dpi=150)
+        ax_dur.plot(runs, durations, marker="o", linewidth=2.2, markersize=7, color="#e11d48", label=f"{machine_label} (Sustained Load)", zorder=3)
+        r1_val = durations.iloc[0]
+        r_end_val = durations.iloc[-1]
+        ax_dur.annotate(f"Run 1: {r1_val:.1f}s\n(Cold)", xy=(runs.iloc[0], r1_val), xytext=(15, 15), textcoords="offset points",
+                        arrowprops=dict(arrowstyle="->", color="#1e293b", lw=1), fontweight="bold", fontsize=9, color="#1e293b")
+        diff_pct = ((r_end_val - r1_val) / r1_val) * 100
+        sign = "+" if diff_pct >= 0 else ""
+        ax_dur.annotate(f"Run {runs.iloc[-1]}: {r_end_val:.1f}s\n({sign}{diff_pct:.1f}%)", xy=(runs.iloc[-1], r_end_val), xytext=(-45, 15),
+                        textcoords="offset points", arrowprops=dict(arrowstyle="->", color="#1e293b", lw=1), fontweight="bold", fontsize=9, color="#9f1239")
+        ax_dur.set_title(f"Thermal Throttling: Execution Time vs. Iterations ({machine_label})", fontsize=13, fontweight="bold", pad=15)
+        ax_dur.set_xlabel("Consecutive Run Index (1 to 15)", fontsize=11, labelpad=10)
+        ax_dur.set_ylabel("Execution Time (seconds)", fontsize=11, labelpad=10)
+        ax_dur.set_xticks(runs.tolist())
+        ax_dur.grid(True, linestyle="--", alpha=0.6)
+        ax_dur.legend(frameon=True, facecolor="white", edgecolor="#cbd5e1")
+        ax_dur.set_ylim(bottom=max(0, durations.min() * 0.9), top=durations.max() * 1.15)
+        fig.tight_layout()
 
-    # Adjust y limits for aesthetic margins
-    y_min = max(0, durations.min() * 0.9)
-    y_max = durations.max() * 1.15
-    ax.set_ylim(bottom=y_min, top=y_max)
-
-    fig.tight_layout()
     fig.savefig(plot_path, dpi=300)
     print(f"Throttling plot saved to: {plot_path}")
 
@@ -226,7 +376,7 @@ def _plot_throttling(df_results, plot_path, machine_label, show_plot):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Thermal Throttling Benchmark under continuous load.")
+    parser = argparse.ArgumentParser(description="Thermal Throttling Benchmark under continuous load with telemetry.")
     parser.add_argument("--data", default="data/delays_zurich_transport_45034.parquet", help="Path to parquet file")
     parser.add_argument("--output", default="throttling_results.csv", help="CSV output path")
     parser.add_argument("--plot", default="figures/thermal_throttling_runs.png", help="Figure output path")
