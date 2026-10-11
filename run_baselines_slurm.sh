@@ -67,7 +67,7 @@ python3 scripts/visualize_benchmark.py \
 
 # 5. RandomForest Multi-Core Scaling Benchmark (1, 2, 4, 8, 12, 16, 24 Kerne)
 echo "[3/4] Starte RandomForest Multi-Core Benchmark (1..24 Kerne)..."
-python3 scripts/test.py \
+python3 scripts/benchmark_rf.py \
     --data "$DATASET_PATH" \
     --output "results/benchmark_cluster_rf.csv" \
     --cores 1 2 4 8 12 16 24 \

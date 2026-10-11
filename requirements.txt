@@ -7,3 +7,5 @@ xgboost>=2.0.0
 ipyparallel>=8.6.0
 matplotlib>=3.7.0
 psutil>=5.9.0
+# Intel Xeon oneDAL acceleration (Cluster x86_64)
+scikit-learn-intelex>=2024.0.0; platform_machine == "x86_64"

@@ -60,19 +60,24 @@ if [ ! -f "$DATASET_PATH" ]; then
     python3 scripts/download_45034.py
 fi
 
-# 5. IPyParallel Controller starten
-echo "[3/6] Starte IPyParallel Controller..."
-ipcontroller --ip="*" &
-CONTROLLER_PID=$!
-sleep 6
-
-# 6. 24 IPyParallel Engines via srun starten
-echo "[4/6] Starte 24 IPyParallel Engines via srun..."
-srun -n 24 ipengine &
+# 5. IPyParallel Cluster starten (1 Controller + 24 Engines)
+echo "[3/6] Starte IPyParallel Cluster (1 Controller + 24 Engines)..."
+ipcluster start -n 24 --daemonize || {
+    echo "Fallback: Starte ipcontroller und 24 Engines direkt..."
+    ipcontroller --ip="*" &
+    CONTROLLER_PID=$!
+    sleep 5
+    for i in $(seq 1 24); do
+        ipengine &
+    done
+}
 sleep 8
 
+# 6. Prüfen, ob Engines online sind
+python3 -c "import ipyparallel as ipp; rc = ipp.Client(timeout=10); print(f'Erfolgreich verbunden mit {len(rc.ids)} Engines: {rc.ids}')"
+
 # 7. Strong Scaling Benchmark ausführen
-echo "[5/6] Starte Strong Scaling Benchmark (1, 2, 4, 8, 12, 16, 24 Kerne)..."
+echo "[4/6] Starte Strong Scaling Benchmark (1, 2, 4, 8, 12, 16, 24 Kerne)..."
 python3 scripts/benchmark_strong_scaling.py \
     --data "$DATASET_PATH" \
     --output "results/benchmark_strong_scaling.csv" \
@@ -81,7 +86,7 @@ python3 scripts/benchmark_strong_scaling.py \
     --runs 3
 
 # Optional: Paralleles Ensemble (Tag 8)
-echo "[5b/6] Starte Parallelen Ensemble-Benchmark..."
+echo "[5/6] Starte Parallelen Ensemble-Benchmark..."
 python3 scripts/benchmark_ensemble.py \
     --data "$DATASET_PATH" \
     --sample-size 0 \
@@ -97,6 +102,8 @@ python3 scripts/plot_scaling_and_numa.py \
 # 9. Aufräumen & Beenden
 echo "Beende IPyParallel Controller & Engines..."
 ipcluster stop || true
+pkill -u $USER -f ipengine || true
+pkill -u $USER -f ipcontroller || true
 kill -9 $CONTROLLER_PID 2>/dev/null || true
 
 echo "Finished at `date`"
