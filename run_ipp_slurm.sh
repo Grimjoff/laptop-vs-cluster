@@ -1,0 +1,102 @@
+#!/usr/bin/bash
+# ==============================================================================
+# Slurm Batch-Skript für IPyParallel Strong-Scaling Benchmark (HPC SoSe 2026)
+# Exakt abgestimmt auf die Cluster-Konfiguration
+# ==============================================================================
+#SBATCH --account=<YOUR_ACCOUNT>
+#SBATCH --partition=<YOUR_PARTITION>
+
+#SBATCH --job-name=ipp_benchmark
+#SBATCH --output=%u.log.%j.out
+#SBATCH --error=%u.log.%j.err
+
+#SBATCH --time=0-01:30:00
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=24
+
+set -e
+
+echo "Starting at `date`"
+echo "Running on hosts: $SLURM_NODELIST"
+echo "Running on $SLURM_NNODES nodes."
+echo "Maximal threads per process: $SLURM_CPUS_PER_TASK"
+echo "Current working directory is `pwd`"
+
+# 1. Verzeichnisse anlegen
+mkdir -p logs figures data results
+
+# 2. Module laden wie in Vorlesung & Übung
+echo "[1/6] Lade Module und aktiviere Python-Environment..."
+module purge
+module add slurm
+module add miniconda3 || module load miniconda3 || module load python/3.11 || true
+
+# Umgebung aktivieren (unterstützt Conda 'data-science' oder eigenes venv)
+if [ -d "$HOME/.conda/envs/data-science" ]; then
+    source activate data-science
+elif [ -d "$HOME/.conda/envs/hpc_env" ]; then
+    source activate hpc_env
+elif [ -f "$HOME/hpc_env/bin/activate" ]; then
+    source "$HOME/hpc_env/bin/activate"
+elif [ -f "./.venv/bin/activate" ]; then
+    source "./.venv/bin/activate"
+fi
+
+python3 --version
+python3 -c "import ipyparallel, sklearn, xgboost; print('Python-Pakete erfolgreich verifiziert.')"
+
+# 3. Prozess-Threading für IPyParallel auf 1 setzen (verhindert Überbelegung)
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export VECLIB_MAXIMUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+
+# 4. Datensatz prüfen
+DATASET_PATH="data/delays_zurich_transport_45034.parquet"
+if [ ! -f "$DATASET_PATH" ]; then
+    echo "[2/6] Datensatz nicht gefunden. Starte Download..."
+    python3 scripts/download_45034.py
+fi
+
+# 5. IPyParallel Controller starten
+echo "[3/6] Starte IPyParallel Controller..."
+ipcontroller --ip="*" &
+CONTROLLER_PID=$!
+sleep 6
+
+# 6. 24 IPyParallel Engines via srun starten
+echo "[4/6] Starte 24 IPyParallel Engines via srun..."
+srun -n 24 ipengine &
+sleep 8
+
+# 7. Strong Scaling Benchmark ausführen
+echo "[5/6] Starte Strong Scaling Benchmark (1, 2, 4, 8, 12, 16, 24 Kerne)..."
+python3 scripts/benchmark_strong_scaling.py \
+    --data "$DATASET_PATH" \
+    --output "results/benchmark_strong_scaling.csv" \
+    --sample-size 0 \
+    --cores 1 2 4 8 12 16 24 \
+    --runs 3
+
+# Optional: Paralleles Ensemble (Tag 8)
+echo "[5b/6] Starte Parallelen Ensemble-Benchmark..."
+python3 scripts/benchmark_ensemble.py \
+    --data "$DATASET_PATH" \
+    --sample-size 0 \
+    --output "results/benchmark_ensemble_results.csv" || true
+
+# 8. Veröffentlichungs-Grafiken (Speedup & cc-NUMA) generieren
+echo "[6/6] Generiere Veröffentlichungs-Grafiken (Speedup & cc-NUMA Effizienz)..."
+python3 scripts/plot_scaling_and_numa.py \
+    --csv "results/benchmark_strong_scaling.csv" \
+    --output-dir "figures" \
+    --no-show
+
+# 9. Aufräumen & Beenden
+echo "Beende IPyParallel Controller & Engines..."
+ipcluster stop || true
+kill -9 $CONTROLLER_PID 2>/dev/null || true
+
+echo "Finished at `date`"
