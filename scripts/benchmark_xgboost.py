@@ -56,14 +56,21 @@ def run_xgboost_benchmark(
 
     last_model = None
 
+    import xgboost as xgb
+
     for cores in cores_list:
         print(f"\n>>> Benchmarking n_jobs = {cores} ({runs_per_core} runs) <<<")
+        # Enforce thread limit in XGBoost C++ core and OpenMP runtime
+        xgb.set_config(nthread=cores)
+        os.environ["OMP_NUM_THREADS"] = str(cores)
+
         for run_idx in range(1, runs_per_core + 1):
             model = XGBRegressor(
                 n_estimators=n_estimators,
                 max_depth=max_depth,
                 tree_method="hist",  # High-performance histogram split method
                 n_jobs=cores,        # OpenMP parallel thread count
+                nthread=cores,
                 random_state=random_state,
             )
 
