@@ -10,7 +10,7 @@
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
 
-#SBATCH --time=0-01:30:00
+#SBATCH --time=0-00:30:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=24
@@ -76,20 +76,21 @@ sleep 8
 # 6. Prüfen, ob Engines online sind
 python3 -c "import ipyparallel as ipp; rc = ipp.Client(timeout=10); print(f'Erfolgreich verbunden mit {len(rc.ids)} Engines: {rc.ids}')"
 
-# 7. Strong Scaling Benchmark ausführen
+# 7. Strong Scaling Benchmark ausführen (500.000 Samples für sauberen 1..24 Kern-Sweep)
+export PYTHONUNBUFFERED=1
 echo "[4/6] Starte Strong Scaling Benchmark (1, 2, 4, 8, 12, 16, 24 Kerne)..."
 python3 scripts/benchmark_strong_scaling.py \
     --data "$DATASET_PATH" \
     --output "results/benchmark_strong_scaling.csv" \
-    --sample-size 0 \
+    --sample-size 500000 \
     --cores 1 2 4 8 12 16 24 \
-    --runs 3
+    --runs 2
 
 # Optional: Paralleles Ensemble (Tag 8)
 echo "[5/6] Starte Parallelen Ensemble-Benchmark..."
 python3 scripts/benchmark_ensemble.py \
     --data "$DATASET_PATH" \
-    --sample-size 0 \
+    --sample-size 500000 \
     --output "results/benchmark_ensemble_results.csv" || true
 
 # 8. Veröffentlichungs-Grafiken (Speedup & cc-NUMA) generieren
