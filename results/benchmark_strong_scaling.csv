@@ -1,0 +1,8 @@
+method,model,cores,dataset_rows,duration_sec,speedup,efficiency,rmse,r2
+ipyparallel,EnsembleGrid,1,500000,315.8222,1.0,1.0,3.0667,0.044
+ipyparallel,EnsembleGrid,2,500000,158.9609,1.9868,0.9934,3.0667,0.044
+ipyparallel,EnsembleGrid,4,500000,102.8907,3.0695,0.7674,3.0667,0.044
+ipyparallel,EnsembleGrid,8,500000,67.0716,4.7087,0.5886,3.0667,0.044
+ipyparallel,EnsembleGrid,12,500000,50.3257,6.2756,0.523,3.0667,0.044
+ipyparallel,EnsembleGrid,16,500000,45.4842,6.9436,0.434,3.0667,0.044
+ipyparallel,EnsembleGrid,24,500000,42.2274,7.4791,0.3116,3.0667,0.044

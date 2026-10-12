@@ -1,0 +1,10 @@
+type,name,train_time_sec,rmse,r2
+submodel,RandomForest_1,38.0547,3.0657,0.0446
+submodel,RandomForest_2,47.1885,3.0665,0.0441
+submodel,RandomForest_3,58.6355,3.0685,0.0429
+submodel,RandomForest_4,61.3143,3.0699,0.042
+submodel,XGBoost_5,3.4274,3.0671,0.0438
+submodel,XGBoost_6,5.0177,3.0642,0.0456
+submodel,XGBoost_7,7.5406,3.0643,0.0455
+submodel,XGBoost_8,11.095,3.066,0.0444
+ensemble,VotingRegressor_Ensemble,62.5758,3.0648,0.0452
