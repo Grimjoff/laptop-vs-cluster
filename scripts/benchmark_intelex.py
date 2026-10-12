@@ -190,9 +190,12 @@ def run_benchmark(
         # ------------------------------------------------------------------
         if intelex_available:
             print(f"\n--- [B] Intel Extension for Scikit-Learn (Intel oneDAL AVX-512) ---")
-            from sklearnex import patch_sklearn, unpatch_sklearn
-            patch_sklearn("RandomForestRegressor")
-            from sklearn.ensemble import RandomForestRegressor as IntelRF
+            try:
+                from sklearnex.ensemble import RandomForestRegressor as IntelRF
+            except (ImportError, AttributeError):
+                from sklearnex import patch_sklearn
+                patch_sklearn()
+                from sklearn.ensemble import RandomForestRegressor as IntelRF
 
             intel_durations = []
             intel_rmses = []
@@ -237,7 +240,6 @@ def run_benchmark(
                     "cpu_model": cpu_label,
                 })
 
-            unpatch_sklearn("RandomForestRegressor")
             avg_intel_duration = np.mean(intel_durations)
             speedup = avg_stock_duration / avg_intel_duration
             print(f"  ==> Intel Extension Average Duration: {avg_intel_duration:.2f}s")
