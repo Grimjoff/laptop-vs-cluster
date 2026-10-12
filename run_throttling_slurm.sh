@@ -9,8 +9,8 @@
 #SBATCH --partition=<YOUR_PARTITION>
 
 #SBATCH --job-name=cluster_throttling
-#SBATCH --output=%u.log.%j.out
-#SBATCH --error=%u.log.%j.err
+#SBATCH --output=logs/%x_%j.out
+#SBATCH --error=logs/%x_%j.err
 
 #SBATCH --time=0-00:45:00
 #SBATCH --nodes=1

@@ -7,8 +7,8 @@
 #SBATCH --partition=<YOUR_PARTITION>
 
 #SBATCH --job-name=xgboost_benchmark
-#SBATCH --output=%u.log.%j.out
-#SBATCH --error=%u.log.%j.err
+#SBATCH --output=logs/%x_%j.out
+#SBATCH --error=logs/%x_%j.err
 
 #SBATCH --time=0-00:30:00
 #SBATCH --nodes=1
