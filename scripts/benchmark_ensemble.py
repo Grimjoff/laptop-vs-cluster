@@ -141,7 +141,7 @@ def run_parallel_ensemble(
 
     cluster = None
     try:
-        rc = ipp.Client(timeout=4)
+        rc = ipp.Client(timeout=15)
         print(f"Connected to existing cluster! Active engines ({len(rc.ids)}): {rc.ids}")
     except Exception as e:
         if not auto_start_cluster:

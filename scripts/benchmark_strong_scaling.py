@@ -193,7 +193,7 @@ def run_strong_scaling_benchmark(
     # 1. Connect to cluster or start locally
     cluster = None
     try:
-        rc = ipp.Client(timeout=4)
+        rc = ipp.Client(timeout=15)
         print(f"Connected to existing IPyParallel Cluster! Total registered engines: {len(rc.ids)}")
     except Exception as e:
         if not auto_start_cluster:

@@ -60,18 +60,19 @@ if [ ! -f "$DATASET_PATH" ]; then
     python3 scripts/download_45034.py
 fi
 
-# 5. IPyParallel Cluster starten (1 Controller + 24 Engines)
-echo "[3/6] Starte IPyParallel Cluster (1 Controller + 24 Engines)..."
-ipcluster start -n 24 --daemonize || {
-    echo "Fallback: Starte ipcontroller und 24 Engines direkt..."
-    ipcontroller --ip="*" &
-    CONTROLLER_PID=$!
-    sleep 5
-    for i in $(seq 1 24); do
-        ipengine &
-    done
-}
-sleep 8
+# 5. Alte Stale-PIDs und Zombie-Sockets von vorherigen Jobs bereinigen
+echo "[2b/6] Bereinige alte IPyParallel Profile, PIDs und Sockets..."
+ipcluster clean --profile=default 2>/dev/null || true
+pkill -u $USER -f ipengine 2>/dev/null || true
+pkill -u $USER -f ipcontroller 2>/dev/null || true
+rm -rf ~/.ipython/profile_default/pid/* 2>/dev/null || true
+rm -rf ~/.ipython/profile_default/security/* 2>/dev/null || true
+sleep 3
+
+# 6. IPyParallel Cluster frisch starten (1 Controller + 24 Engines)
+echo "[3/6] Starte IPyParallel Cluster frisch (1 Controller + 24 Engines)..."
+ipcluster start -n 24 --daemonize
+sleep 10
 
 # 6. Prüfen, ob Engines online sind
 python3 -c "import ipyparallel as ipp; rc = ipp.Client(timeout=10); print(f'Erfolgreich verbunden mit {len(rc.ids)} Engines: {rc.ids}')"
