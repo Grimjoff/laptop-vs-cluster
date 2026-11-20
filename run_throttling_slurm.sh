@@ -5,7 +5,7 @@
 # 24 Kernen aus, um die thermische und frequenzielle Stabilität der Xeon-CPUs
 # im Vergleich zum thermisch drosselnden Mac M4 Laptop zu beweisen.
 # ==============================================================================
-#SBATCH --account=<YOUR_ACCOUNT>
+#SBATCH --account=<YOUR_ACCOUNT>   # set to your cluster account
 #SBATCH --partition=<YOUR_PARTITION>
 
 #SBATCH --job-name=cluster_throttling

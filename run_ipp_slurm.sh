@@ -1,9 +1,9 @@
 #!/usr/bin/bash
 # ==============================================================================
 # Slurm Batch-Skript für IPyParallel Strong-Scaling Benchmark (HPC SoSe 2026)
-# Exakt abgestimmt auf die Cluster-Konfiguration
+# Adjust account/partition below for your cluster
 # ==============================================================================
-#SBATCH --account=<YOUR_ACCOUNT>
+#SBATCH --account=<YOUR_ACCOUNT>   # set to your cluster account
 #SBATCH --partition=<YOUR_PARTITION>
 
 #SBATCH --job-name=ipp_benchmark

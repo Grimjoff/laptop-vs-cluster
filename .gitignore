@@ -4,8 +4,12 @@ __pycache__/
 data/
 *.parquet
 .DS_Store
+.vscode/
+.idea/
 
-# Allow benchmark result CSVs and figures
-!results/
-!results/*.csv
-!figures/*.png
+# Cluster job output and private material
+logs/
+*.out
+*.err
+*.log
+*.pdf

@@ -1,14 +1,14 @@
 #!/usr/bin/bash
 # ==============================================================================
 # Slurm Batch-Skript für Shared-Memory Multi-Core Baselines (HPC SoSe 2026)
-# Exakt abgestimmt auf die Cluster-Konfiguration
+# Adjust account/partition below for your cluster
 # ==============================================================================
-#SBATCH --account=<YOUR_ACCOUNT>
+#SBATCH --account=<YOUR_ACCOUNT>   # set to your cluster account
 #SBATCH --partition=<YOUR_PARTITION>
 
 #SBATCH --job-name=baselines_benchmark
-#SBATCH --output=%u.log.%j.out
-#SBATCH --error=%u.log.%j.err
+#SBATCH --output=logs/%x_%j.out
+#SBATCH --error=logs/%x_%j.err
 
 #SBATCH --time=0-03:00:00
 #SBATCH --nodes=1

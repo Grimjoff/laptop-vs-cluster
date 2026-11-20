@@ -1,0 +1,7 @@
+method,model,cores,dataset_rows,n_estimators,max_depth,learning_rate,n_jobs_per_worker,train_time_sec,pred_time_sec,duration_sec,rmse,mae,r2,worker_pid
+ipyparallel,RandomForest,4,100000,50,10,,1,3.9738,0.067,4.0408,3.0928,2.5971,0.0339,22620
+ipyparallel,RandomForest,4,100000,100,15,,1,8.906,0.196,9.102,3.1167,2.5997,0.0189,3388
+ipyparallel,RandomForest,4,100000,100,20,,1,9.5461,0.2201,9.7662,3.1351,2.6061,0.0073,6820
+ipyparallel,XGBoost,4,100000,100,6,0.1,1,0.4227,0.022,0.4447,3.0898,2.5978,0.0358,28416
+ipyparallel,XGBoost,4,100000,200,8,0.05,1,0.925,0.057,0.982,3.0989,2.5958,0.0301,28416
+ipyparallel,XGBoost,4,100000,300,10,0.05,1,1.8516,0.124,1.9756,3.1254,2.6023,0.0134,28416

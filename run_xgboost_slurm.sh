@@ -3,7 +3,7 @@
 # Slurm Batch-Skript für XGBoost Multi-Core Scaling Benchmark (HPC SoSe 2026)
 # Misst echte Thread-Skalierung über 1, 2, 4, 8, 12, 16, 24 Kerne
 # ==============================================================================
-#SBATCH --account=<YOUR_ACCOUNT>
+#SBATCH --account=<YOUR_ACCOUNT>   # set to your cluster account
 #SBATCH --partition=<YOUR_PARTITION>
 
 #SBATCH --job-name=xgboost_benchmark

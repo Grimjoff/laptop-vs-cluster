@@ -3,7 +3,7 @@
 # Slurm Batch-Skript für Intel Extension for Scikit-Learn (HPC SoSe 2026)
 # Vergleicht Stock Scikit-Learn gegen Intel oneDAL AVX-512 auf Intel Xeon Gold
 # ==============================================================================
-#SBATCH --account=<YOUR_ACCOUNT>
+#SBATCH --account=<YOUR_ACCOUNT>   # set to your cluster account
 #SBATCH --partition=<YOUR_PARTITION>
 
 #SBATCH --job-name=intelex_benchmark
