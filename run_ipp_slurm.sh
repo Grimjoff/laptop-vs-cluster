@@ -87,7 +87,7 @@ python3 scripts/benchmark_strong_scaling.py \
     --cores 1 2 4 8 12 16 24 \
     --runs 2
 
-# Optional: Paralleles Ensemble (Tag 8)
+# Optional: Paralleles Ensemble
 echo "[5/6] Starte Parallelen Ensemble-Benchmark..."
 python3 scripts/benchmark_ensemble.py \
     --data "$DATASET_PATH" \

@@ -1,7 +1,6 @@
 """
-Parallel Ensemble Training via IPyParallel (Day 8 — HPC Cluster & Local)
+Parallel Ensemble Training via IPyParallel (HPC Cluster & Local)
 ========================================================================
-Implements Phase 3 (Day 8) of the HPC Sprint Roadmap:
 Trains diverse sub-models (Random Forest & XGBoost) in parallel across
 IPyParallel engines and aggregates them into an ensemble predictor (Voting/Blending).
 
@@ -136,7 +135,7 @@ def run_parallel_ensemble(
     from sklearn.metrics import root_mean_squared_error, r2_score, mean_absolute_error
 
     print("=" * 80)
-    print(" Parallel Ensemble Regressor (Day 8 — Voting / Blending via IPyParallel)")
+    print(" Parallel Ensemble Regressor (Voting / Blending via IPyParallel)")
     print("=" * 80)
 
     cluster = None

@@ -1,5 +1,5 @@
 """
-Strong Scaling Benchmark via IPyParallel (Day 6 — HPC Cluster & Local)
+Strong Scaling Benchmark via IPyParallel (HPC Cluster & Local)
 ======================================================================
 Measures Strong Scaling of distributed task execution across varying core
 counts (e.g. 1, 2, 4, 8, 12, 16, 24 cores) on a fixed total workload.
@@ -9,7 +9,7 @@ Calculates:
 - Speedup       : S(p) = T_1 / T_p
 - Efficiency    : E(p) = S(p) / p
 
-Exports to the standardized CSV schema specified in Section 8 of the Roadmap:
+Exports to the standardized CSV schema for results:
 method,model,cores,dataset_rows,duration_sec,speedup,efficiency,rmse,r2
 """
 
@@ -277,7 +277,7 @@ def run_strong_scaling_benchmark(
                 f"{mean_rmse:>8.4f}"
             )
 
-            # Record adhering to team standard format (Roadmap Section 8)
+            # Record in the standardized CSV format
             label_model = "RandomForest" if model_choice == "rf" else ("XGBoost" if model_choice == "xgb" else "EnsembleGrid")
             results_records.append({
                 "method": "ipyparallel",

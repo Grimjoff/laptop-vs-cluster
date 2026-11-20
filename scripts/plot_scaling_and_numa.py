@@ -1,9 +1,9 @@
 """
-Plotting Pipeline for Strong Scaling & cc-NUMA Analysis (Day 10 — HPC SoSe 2026)
+Plotting Pipeline for Strong Scaling & cc-NUMA Analysis
 ================================================================================
-Generates the mandatory publication-grade figures (300 DPI) for the portfolio report:
-- Graphic 2: Strong Scaling Speedup (S(p) vs. Ideal S=p)
-- Graphic 3: Parallel Efficiency & cc-NUMA Analysis (E(p) in % with 12-core socket boundary)
+Generates publication-grade figures (300 DPI):
+- Strong Scaling Speedup (S(p) vs. Ideal S=p)
+- Parallel Efficiency & cc-NUMA Analysis (E(p) in % with 12-core socket boundary)
 """
 
 import os
@@ -36,7 +36,7 @@ def plot_strong_scaling_and_numa(
     efficiencies = (df["efficiency"].to_numpy() if "efficiency" in df.columns else speedups / cores) * 100.0
 
     # --------------------------------------------------------------------------
-    # Grafik 2: Strong Scaling Speedup (Empirisch vs. Ideal S = p)
+    # Figure 1: Strong Scaling Speedup (Empirisch vs. Ideal S = p)
     # --------------------------------------------------------------------------
     fig1, ax1 = plt.subplots(figsize=(8.5, 5.2), dpi=300)
 
@@ -80,7 +80,7 @@ def plot_strong_scaling_and_numa(
             color="#1e293b",
         )
 
-    ax1.set_title("Grafik 2: Strong Scaling Speedup auf dem HPC-Cluster", fontsize=13, fontweight="bold", pad=15)
+    ax1.set_title("Strong Scaling Speedup auf dem HPC-Cluster", fontsize=13, fontweight="bold", pad=15)
     ax1.set_xlabel("Anzahl CPU-Kerne (p)", fontsize=11, labelpad=10)
     ax1.set_ylabel("Speedup-Faktor S(p)", fontsize=11, labelpad=10)
     ax1.set_xticks(cores)
@@ -92,10 +92,10 @@ def plot_strong_scaling_and_numa(
     fig1.tight_layout()
     path_graphic2 = os.path.join(output_dir, "strong_scaling_speedup.png")
     fig1.savefig(path_graphic2, dpi=300)
-    print(f"Grafik 2 erfolgreich gespeichert: {path_graphic2}")
+    print(f"Speedup plot erfolgreich gespeichert: {path_graphic2}")
 
     # --------------------------------------------------------------------------
-    # Grafik 3: Parallele Effizienz & cc-NUMA Analyse (Sockelübergang bei 12 Kernen)
+    # Figure 2: Parallele Effizienz & cc-NUMA Analyse (Sockelübergang bei 12 Kernen)
     # --------------------------------------------------------------------------
     fig2, ax2 = plt.subplots(figsize=(8.5, 5.2), dpi=300)
 
@@ -143,7 +143,7 @@ def plot_strong_scaling_and_numa(
             color="#064e3b",
         )
 
-    ax2.set_title("Grafik 3: Parallele Effizienz & cc-NUMA Analyse (Intel Xeon)", fontsize=13, fontweight="bold", pad=15)
+    ax2.set_title("Parallele Effizienz & cc-NUMA Analyse (Intel Xeon)", fontsize=13, fontweight="bold", pad=15)
     ax2.set_xlabel("Anzahl CPU-Kerne (p)", fontsize=11, labelpad=10)
     ax2.set_ylabel("Parallele Effizienz E(p) in %", fontsize=11, labelpad=10)
     ax2.set_xticks(cores)
@@ -155,7 +155,7 @@ def plot_strong_scaling_and_numa(
     fig2.tight_layout()
     path_graphic3 = os.path.join(output_dir, "parallel_efficiency_numa.png")
     fig2.savefig(path_graphic3, dpi=300)
-    print(f"Grafik 3 erfolgreich gespeichert: {path_graphic3}")
+    print(f"Efficiency plot erfolgreich gespeichert: {path_graphic3}")
 
     if show_plots:
         plt.show()
